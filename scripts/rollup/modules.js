@@ -87,7 +87,7 @@ function createModuleMap(paths, extractErrors, bundleType) {
   return moduleMap;
 }
 
-function getNodeModules(bundleType) {
+function getNodeModules(bundleType, isRenderer) {
   // rather than adding the rollup node resolve plugin,
   // we can instead deal with the only node module that is used
   // for UMD bundles - object-assign
@@ -95,7 +95,11 @@ function getNodeModules(bundleType) {
     case UMD_DEV:
     case UMD_PROD:
       return {
-        'object-assign': resolve('./node_modules/object-assign/index.js'),
+        // Bundle object-assign once in the isomorphic React, and then use
+        // that from the renderer UMD. Avoids bundling it in both UMDs.
+        'object-assign': isRenderer
+          ? resolve('./scripts/rollup/shims/rollup/assign.js')
+          : resolve('./node_modules/object-assign/index.js'),
         // include the ART package modules directly by aliasing them from node_modules
         'art/modes/current': resolve('./node_modules/art/modes/current.js'),
         'art/modes/fast-noSideEffects': resolve(
@@ -127,8 +131,7 @@ function ignoreFBModules() {
 
 function ignoreReactNativeModules() {
   return [
-    // This imports NativeMethodsMixin, causing
-    // a circular dependency.
+    // This imports NativeMethodsMixin, causing a circular dependency.
     'View',
   ];
 }
@@ -140,7 +143,7 @@ function getExternalModules(externals, bundleType, isRenderer) {
   // this means having a require("name-of-external-module") at
   // the top of the bundle. for UMD bundles this means having
   // both a require and a global check for them
-  let externalModules = externals;
+  let externalModules = externals.slice();
 
   switch (bundleType) {
     case UMD_DEV:
@@ -155,7 +158,6 @@ function getExternalModules(externals, bundleType, isRenderer) {
     case RN_PROD:
       fbjsModules.forEach(module => externalModules.push(module));
       externalModules.push('object-assign');
-
       if (isRenderer) {
         externalModules.push('react');
       }
@@ -163,6 +165,7 @@ function getExternalModules(externals, bundleType, isRenderer) {
     case FB_DEV:
     case FB_PROD:
       fbjsModules.forEach(module => externalModules.push(module));
+      externalModules.push('object-assign');
       externalModules.push('ReactCurrentOwner');
       externalModules.push('lowPriorityWarning');
       if (isRenderer) {
@@ -272,7 +275,7 @@ function replaceBundleStubModules(bundleModulesToStub) {
 
   if (Array.isArray(bundleModulesToStub)) {
     bundleModulesToStub.forEach(module => {
-      stubbedModules[module] = devOnlyModuleStub;
+      stubbedModules[`'${module}'`] = devOnlyModuleStub;
     });
   }
 
@@ -287,7 +290,7 @@ function getAliases(paths, bundleType, isRenderer, extractErrors) {
       bundleType
     ),
     getInternalModules(),
-    getNodeModules(bundleType),
+    getNodeModules(bundleType, isRenderer),
     getFbjsModuleAliases(bundleType)
   );
 }

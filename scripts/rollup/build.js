@@ -18,9 +18,11 @@ const Bundles = require('./bundles');
 const propertyMangleWhitelist = require('./mangle').propertyMangleWhitelist;
 const sizes = require('./plugins/sizes-plugin');
 const Stats = require('./stats');
+const syncReactDom = require('./sync').syncReactDom;
 const syncReactNative = require('./sync').syncReactNative;
 const Packaging = require('./packaging');
 const Header = require('./header');
+const closure = require('rollup-plugin-closure-compiler-js');
 
 const UMD_DEV = Bundles.bundleTypes.UMD_DEV;
 const UMD_PROD = Bundles.bundleTypes.UMD_PROD;
@@ -39,6 +41,7 @@ const requestedBundleNames = (argv._[0] || '')
   .split(',')
   .map(type => type.toLowerCase());
 const syncFbsource = argv['sync-fbsource'];
+const syncWww = argv['sync-www'];
 
 // used for when we property mangle with uglify/gcc
 const mangleRegex = new RegExp(
@@ -76,40 +79,63 @@ function getHeaderSanityCheck(bundleType, hasteName) {
 
 function getBanner(bundleType, hasteName, filename) {
   switch (bundleType) {
+    // UMDs are not wrapped in conditions.
+    case UMD_DEV:
+    case UMD_PROD:
+      return Header.getHeader(filename, reactVersion);
+    // CommonJS DEV bundle is guarded to help weak dead code elimination.
+    case NODE_DEV:
+      let banner = Header.getHeader(filename, reactVersion);
+      // Wrap the contents of the if-DEV check with an IIFE.
+      // Block-level function definitions can cause problems for strict mode.
+      banner += `'use strict';\n\n\nif (process.env.NODE_ENV !== "production") {\n(function() {\n`;
+      return banner;
+    case NODE_PROD:
+      return Header.getHeader(filename, reactVersion);
+    // All FB and RN bundles need Haste headers.
+    // DEV bundle is guarded to help weak dead code elimination.
     case FB_DEV:
     case FB_PROD:
     case RN_DEV:
     case RN_PROD:
-      let hasteFinalName = hasteName;
-      switch (bundleType) {
-        case FB_DEV:
-        case RN_DEV:
-          hasteFinalName += '-dev';
-          break;
-        case FB_PROD:
-        case RN_PROD:
-          hasteFinalName += '-prod';
-          break;
-      }
-      const fbDevCode = `\n\n'use strict';\n\n` + `\nif (__DEV__) {\n`;
-      return Header.getProvidesHeader(hasteFinalName, bundleType, fbDevCode);
-    case UMD_DEV:
-    case UMD_PROD:
-      return Header.getUMDHeader(filename, reactVersion);
+      const isDev = bundleType === FB_DEV || bundleType === RN_DEV;
+      const hasteFinalName = hasteName + (isDev ? '-dev' : '-prod');
+      // Wrap the contents of the if-DEV check with an IIFE.
+      // Block-level function definitions can cause problems for strict mode.
+      return (
+        Header.getProvidesHeader(hasteFinalName) +
+        (isDev ? `\n\n'use strict';\n\n\nif (__DEV__) {\n(function() {\n` : '')
+      );
+    default:
+      throw new Error('Unknown type.');
+  }
+}
+
+function getFooter(bundleType) {
+  // Only need a footer if getBanner() has an opening brace.
+  switch (bundleType) {
+    // Non-UMD DEV bundles need conditions to help weak dead code elimination.
+    case NODE_DEV:
+    case FB_DEV:
+    case RN_DEV:
+      return '\n})();\n}\n';
     default:
       return '';
   }
 }
 
-function getFooter(bundleType) {
-  if (bundleType === FB_DEV) {
-    return '\n}\n';
-  }
-  return '';
-}
-
 function updateBabelConfig(babelOpts, bundleType) {
   switch (bundleType) {
+    case FB_DEV:
+    case FB_PROD:
+    case RN_DEV:
+    case RN_PROD:
+      return Object.assign({}, babelOpts, {
+        plugins: babelOpts.plugins.concat([
+          // Wrap warning() calls in a __DEV__ check so they are stripped from production.
+          require('./plugins/wrap-warning-with-env-check'),
+        ]),
+      });
     case UMD_DEV:
     case UMD_PROD:
     case NODE_DEV:
@@ -118,8 +144,12 @@ function updateBabelConfig(babelOpts, bundleType) {
         plugins: babelOpts.plugins.concat([
           // Use object-assign polyfill in open source
           resolve('./scripts/babel/transform-object-assign-require'),
-          // Replace __DEV__ with process.env.NODE_ENV and minify invariant messages
-          require('../error-codes/dev-expression-with-codes'),
+
+          // Minify invariant messages
+          require('../error-codes/replace-invariant-error-codes'),
+
+          // Wrap warning() calls in a __DEV__ check so they are stripped from production.
+          require('./plugins/wrap-warning-with-env-check'),
         ]),
       });
     default:
@@ -143,12 +173,6 @@ function updateBundleConfig(config, filename, format, bundleType, hasteName) {
     format,
     interop: false,
   });
-}
-
-function setReactNativeUseFiberEnvVariable(useFiber) {
-  return {
-    'process.env.REACT_NATIVE_USE_FIBER': useFiber,
-  };
 }
 
 function stripEnvVariables(production) {
@@ -316,6 +340,23 @@ function getPlugins(
       break;
     case UMD_PROD:
     case NODE_PROD:
+      plugins.push(
+        replace(stripEnvVariables(true)),
+        // needs to happen after strip env
+        commonjs(getCommonJsConfig(bundleType)),
+        closure({
+          compilationLevel: 'SIMPLE',
+          languageIn: 'ECMASCRIPT5_STRICT',
+          languageOut: 'ECMASCRIPT5_STRICT',
+          env: 'CUSTOM',
+          warningLevel: 'QUIET',
+          assumeFunctionWrapper: true,
+          applyInputSourceMaps: false,
+          useTypesForOptimization: false,
+          processCommonJsModules: false,
+        })
+      );
+      break;
     case FB_PROD:
       plugins.push(
         replace(stripEnvVariables(true)),
@@ -338,7 +379,6 @@ function getPlugins(
     case RN_PROD:
       plugins.push(
         replace(stripEnvVariables(bundleType === RN_PROD)),
-        replace(setReactNativeUseFiberEnvVariable(useFiber)),
         // needs to happen after strip env
         commonjs(getCommonJsConfig(bundleType)),
         uglify(
@@ -478,6 +518,8 @@ rimraf('build', () => {
     tasks.push(() =>
       syncReactNative(join('build', 'react-native'), syncFbsource)
     );
+  } else if (syncWww) {
+    tasks.push(() => syncReactDom(join('build', 'facebook-www'), syncWww));
   }
   // rather than run concurently, opt to run them serially
   // this helps improve console/warning/error output

@@ -42,11 +42,11 @@ Remember that this is only necessary before deploying to production. For normal 
 We offer production-ready versions of React and React DOM as single files:
 
 ```html
-<script src="https://unpkg.com/react@15/dist/react.min.js"></script>
-<script src="https://unpkg.com/react-dom@15/dist/react-dom.min.js"></script>
+<script src="https://unpkg.com/react@16/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@16/umd/react-dom.production.min.js"></script>
 ```
 
-Remember that only React files ending with `.min.js` are suitable for production.
+Remember that only React files ending with `.production.min.js` are suitable for production.
 
 ### Brunch
 
@@ -380,10 +380,12 @@ Although `y` was edited, since it's a reference to the same object as `x`, this 
 const SomeRecord = Immutable.Record({ foo: null });
 const x = new SomeRecord({ foo: 'bar' });
 const y = x.set('foo', 'baz');
+const z = x.set('foo', 'bar');
 x === y; // false
+x === z; // true
 ```
 
-In this case, since a new reference is returned when mutating `x`, we can safely assume that `x` has changed.
+In this case, since a new reference is returned when mutating `x`, we can use a reference equality check `(x === y)` to verify that the new value stored in `y` is different than the original value stored in `x`.
 
 Two other libraries that can help use immutable data are [seamless-immutable](https://github.com/rtfeldman/seamless-immutable) and [immutability-helper](https://github.com/kolodny/immutability-helper).
 

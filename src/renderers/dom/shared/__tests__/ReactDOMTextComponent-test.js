@@ -1,10 +1,8 @@
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
  */
@@ -14,6 +12,7 @@
 var React;
 var ReactDOM;
 var ReactDOMServer;
+var ReactDOMFeatureFlags;
 
 // In standard React, TextComponent keeps track of different Text templates
 // using comments. However, in React Fiber, those comments are not outputted due
@@ -29,6 +28,7 @@ describe('ReactDOMTextComponent', () => {
     React = require('react');
     ReactDOM = require('react-dom');
     ReactDOMServer = require('react-dom/server');
+    ReactDOMFeatureFlags = require('ReactDOMFeatureFlags');
   });
 
   it('updates a mounted text component in place', () => {
@@ -117,13 +117,23 @@ describe('ReactDOMTextComponent', () => {
     var reactEl = <div>{'foo'}{'bar'}{'baz'}</div>;
     el.innerHTML = ReactDOMServer.renderToString(reactEl);
 
-    ReactDOM.render(reactEl, el);
+    if (ReactDOMFeatureFlags.useFiber) {
+      ReactDOM.hydrate(reactEl, el);
+    } else {
+      ReactDOM.render(reactEl, el);
+    }
     expect(el.textContent).toBe('foobarbaz');
+
+    ReactDOM.unmountComponentAtNode(el);
 
     reactEl = <div>{''}{''}{''}</div>;
     el.innerHTML = ReactDOMServer.renderToString(reactEl);
 
-    ReactDOM.render(reactEl, el);
+    if (ReactDOMFeatureFlags.useFiber) {
+      ReactDOM.hydrate(reactEl, el);
+    } else {
+      ReactDOM.render(reactEl, el);
+    }
     expect(el.textContent).toBe('');
   });
 

@@ -1,10 +1,8 @@
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  * @providesModule ReactDOMEventListener
  */
@@ -12,7 +10,6 @@
 'use strict';
 
 var EventListener = require('fbjs/lib/EventListener');
-var PooledClass = require('PooledClass');
 var ReactDOMComponentTree = require('ReactDOMComponentTree');
 var ReactFiberTreeReflection = require('ReactFiberTreeReflection');
 var ReactGenericBatching = require('ReactGenericBatching');
@@ -21,6 +18,9 @@ var ReactTypeOfWork = require('ReactTypeOfWork');
 var getEventTarget = require('getEventTarget');
 
 var {HostRoot} = ReactTypeOfWork;
+
+var CALLBACK_BOOKKEEPING_POOL_SIZE = 10;
+var callbackBookkeepingPool = [];
 
 /**
  * Find the deepest React component completely containing the root of the
@@ -50,24 +50,31 @@ function findRootContainerNode(inst) {
 }
 
 // Used to store ancestor hierarchy in top level callback
-function TopLevelCallbackBookKeeping(topLevelType, nativeEvent, targetInst) {
-  this.topLevelType = topLevelType;
-  this.nativeEvent = nativeEvent;
-  this.targetInst = targetInst;
-  this.ancestors = [];
+function getTopLevelCallbackBookKeeping(topLevelType, nativeEvent, targetInst) {
+  if (callbackBookkeepingPool.length) {
+    const instance = callbackBookkeepingPool.pop();
+    instance.topLevelType = topLevelType;
+    instance.nativeEvent = nativeEvent;
+    instance.targetInst = targetInst;
+    return instance;
+  }
+  return {
+    topLevelType,
+    nativeEvent,
+    targetInst,
+    ancestors: [],
+  };
 }
-Object.assign(TopLevelCallbackBookKeeping.prototype, {
-  destructor: function() {
-    this.topLevelType = null;
-    this.nativeEvent = null;
-    this.targetInst = null;
-    this.ancestors.length = 0;
-  },
-});
-PooledClass.addPoolingTo(
-  TopLevelCallbackBookKeeping,
-  PooledClass.threeArgumentPooler,
-);
+
+function releaseTopLevelCallbackBookKeeping(instance) {
+  instance.topLevelType = null;
+  instance.nativeEvent = null;
+  instance.targetInst = null;
+  instance.ancestors.length = 0;
+  if (callbackBookkeepingPool.length < CALLBACK_BOOKKEEPING_POOL_SIZE) {
+    callbackBookkeepingPool.push(instance);
+  }
+}
 
 function handleTopLevelImpl(bookKeeping) {
   var targetInst = bookKeeping.targetInst;
@@ -180,7 +187,7 @@ var ReactDOMEventListener = {
       targetInst = null;
     }
 
-    var bookKeeping = TopLevelCallbackBookKeeping.getPooled(
+    var bookKeeping = getTopLevelCallbackBookKeeping(
       topLevelType,
       nativeEvent,
       targetInst,
@@ -191,7 +198,7 @@ var ReactDOMEventListener = {
       // `preventDefault`.
       ReactGenericBatching.batchedUpdates(handleTopLevelImpl, bookKeeping);
     } finally {
-      TopLevelCallbackBookKeeping.release(bookKeeping);
+      releaseTopLevelCallbackBookKeeping(bookKeeping);
     }
   },
 };

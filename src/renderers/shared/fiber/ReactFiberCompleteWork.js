@@ -1,10 +1,8 @@
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  * @providesModule ReactFiberCompleteWork
  * @flow
@@ -14,15 +12,20 @@
 
 import type {ReactCoroutine} from 'ReactTypes';
 import type {Fiber} from 'ReactFiber';
+import type {PriorityLevel} from 'ReactPriorityLevel';
 import type {HostContext} from 'ReactFiberHostContext';
 import type {HydrationContext} from 'ReactFiberHydrationContext';
 import type {FiberRoot} from 'ReactFiberRoot';
 import type {HostConfig} from 'ReactFiberReconciler';
 
 var {reconcileChildFibers} = require('ReactChildFiber');
-var {popContextProvider} = require('ReactFiberContext');
+var {
+  popContextProvider,
+  popTopLevelContextObject,
+} = require('ReactFiberContext');
 var ReactTypeOfWork = require('ReactTypeOfWork');
 var ReactTypeOfSideEffect = require('ReactTypeOfSideEffect');
+var ReactPriorityLevel = require('ReactPriorityLevel');
 var {
   IndeterminateComponent,
   FunctionalComponent,
@@ -37,6 +40,7 @@ var {
   Fragment,
 } = ReactTypeOfWork;
 var {Placement, Ref, Update} = ReactTypeOfSideEffect;
+var {OffscreenPriority} = ReactPriorityLevel;
 
 if (__DEV__) {
   var ReactDebugCurrentFiber = require('ReactDebugCurrentFiber');
@@ -47,7 +51,7 @@ var invariant = require('fbjs/lib/invariant');
 module.exports = function<T, P, I, TI, PI, C, CX, PL>(
   config: HostConfig<T, P, I, TI, PI, C, CX, PL>,
   hostContext: HostContext<C, CX>,
-  hydrationContext: HydrationContext<C>,
+  hydrationContext: HydrationContext<C, CX>,
 ) {
   const {
     createInstance,
@@ -69,18 +73,6 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
     prepareToHydrateHostTextInstance,
     popHydrationState,
   } = hydrationContext;
-
-  function markChildAsProgressed(current, workInProgress, priorityLevel) {
-    // We now have clones. Let's store them as the currently progressed work.
-    workInProgress.progressedChild = workInProgress.child;
-    workInProgress.progressedPriority = priorityLevel;
-    if (current !== null) {
-      // We also store it on the current. When the alternate swaps in we can
-      // continue from this point.
-      current.progressedChild = workInProgress.progressedChild;
-      current.progressedPriority = workInProgress.progressedPriority;
-    }
-  }
 
   function markUpdate(workInProgress: Fiber) {
     // Tag the fiber with an update effect. This turns a Placement into
@@ -159,7 +151,6 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
       nextChildren,
       priority,
     );
-    markChildAsProgressed(current, workInProgress, priority);
     return workInProgress.child;
   }
 
@@ -194,9 +185,22 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
   function completeWork(
     current: Fiber | null,
     workInProgress: Fiber,
+    renderPriority: PriorityLevel,
   ): Fiber | null {
     if (__DEV__) {
-      ReactDebugCurrentFiber.current = workInProgress;
+      ReactDebugCurrentFiber.setCurrentFiber(workInProgress, null);
+    }
+
+    // Get the latest props.
+    let newProps = workInProgress.pendingProps;
+    if (newProps === null) {
+      newProps = workInProgress.memoizedProps;
+    } else if (
+      workInProgress.pendingWorkPriority !== OffscreenPriority ||
+      renderPriority === OffscreenPriority
+    ) {
+      // Reset the pending props, unless this was a down-prioritization.
+      workInProgress.pendingProps = null;
     }
 
     switch (workInProgress.tag) {
@@ -208,7 +212,8 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
         return null;
       }
       case HostRoot: {
-        // TODO: Pop the host container after #8607 lands.
+        popHostContainer(workInProgress);
+        popTopLevelContextObject(workInProgress);
         const fiberRoot = (workInProgress.stateNode: FiberRoot);
         if (fiberRoot.pendingContext) {
           fiberRoot.context = fiberRoot.pendingContext;
@@ -229,7 +234,6 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
         popHostContext(workInProgress);
         const rootContainerInstance = getRootHostContainer();
         const type = workInProgress.type;
-        const newProps = workInProgress.memoizedProps;
         if (current !== null && workInProgress.stateNode != null) {
           // If we have an alternate, that means this is an update and we need to
           // schedule a side-effect to do the updates.
@@ -283,6 +287,7 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
               prepareToHydrateHostInstance(
                 workInProgress,
                 rootContainerInstance,
+                currentHostContext,
               )
             ) {
               // If changes to the hydrated node needs to be applied at the
@@ -324,7 +329,7 @@ module.exports = function<T, P, I, TI, PI, C, CX, PL>(
         return null;
       }
       case HostText: {
-        let newText = workInProgress.memoizedProps;
+        let newText = newProps;
         if (current && workInProgress.stateNode != null) {
           const oldText = current.memoizedProps;
           // If we have an alternate, that means this is an update and we need

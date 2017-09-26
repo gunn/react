@@ -1,10 +1,8 @@
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
  */
@@ -22,7 +20,7 @@ describe('create-react-class-integration', () => {
     PropTypes = require('prop-types');
     React = require('react');
     ReactDOM = require('react-dom');
-    ReactTestUtils = require('ReactTestUtils');
+    ReactTestUtils = require('react-dom/test-utils');
     createReactClass = require('create-react-class/factory')(
       React.Component,
       React.isValidElement,
@@ -371,6 +369,25 @@ describe('create-react-class-integration', () => {
     var instance;
     var Component = createReactClass({
       displayName: 'MyComponent',
+      mixins: [
+        {
+          componentWillMount() {
+            this.log('mixin.componentWillMount');
+          },
+          componentDidMount() {
+            this.log('mixin.componentDidMount');
+          },
+          componentWillUpdate() {
+            this.log('mixin.componentWillUpdate');
+          },
+          componentDidUpdate() {
+            this.log('mixin.componentDidUpdate');
+          },
+          componentWillUnmount() {
+            this.log('mixin.componentWillUnmount');
+          },
+        },
+      ],
       log(name) {
         ops.push(`${name}: ${this.isMounted()}`);
       },
@@ -407,13 +424,18 @@ describe('create-react-class-integration', () => {
     instance.log('after unmount');
     expect(ops).toEqual([
       'getInitialState: false',
+      'mixin.componentWillMount: false',
       'componentWillMount: false',
       'render: false',
+      'mixin.componentDidMount: true',
       'componentDidMount: true',
+      'mixin.componentWillUpdate: true',
       'componentWillUpdate: true',
       'render: true',
+      'mixin.componentDidUpdate: true',
       'componentDidUpdate: true',
-      'componentWillUnmount: false',
+      'mixin.componentWillUnmount: true',
+      'componentWillUnmount: true',
       'after unmount: false',
     ]);
 

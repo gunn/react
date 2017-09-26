@@ -1,10 +1,8 @@
 /**
- * Copyright 2013-present, Facebook, Inc.
- * All rights reserved.
+ * Copyright (c) 2013-present, Facebook, Inc.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
  */
@@ -38,7 +36,8 @@ describe('ReactDOMInput', () => {
     ReactDOM = require('react-dom');
     ReactDOMServer = require('react-dom/server');
     ReactDOMFeatureFlags = require('ReactDOMFeatureFlags');
-    ReactTestUtils = require('ReactTestUtils');
+    ReactTestUtils = require('react-dom/test-utils');
+    // TODO: can we express this test with only public API?
     inputValueTracking = require('inputValueTracking');
     spyOn(console, 'error');
   });
@@ -231,6 +230,40 @@ describe('ReactDOMInput', () => {
       expect(node.getAttribute('value')).toBe('2.0');
       expect(node.value).toBe('2.0');
     });
+  });
+
+  it('does change the string ".98" to "0.98" with no change handler', () => {
+    class Stub extends React.Component {
+      state = {
+        value: '.98',
+      };
+      render() {
+        return <input type="number" value={this.state.value} />;
+      }
+    }
+
+    var stub = ReactTestUtils.renderIntoDocument(<Stub />);
+    var node = ReactDOM.findDOMNode(stub);
+    stub.setState({value: '0.98'});
+
+    expect(node.value).toEqual('0.98');
+  });
+
+  it('distinguishes precision for extra zeroes in string number values', () => {
+    class Stub extends React.Component {
+      state = {
+        value: '3.0000',
+      };
+      render() {
+        return <input type="number" value={this.state.value} />;
+      }
+    }
+
+    var stub = ReactTestUtils.renderIntoDocument(<Stub />);
+    var node = ReactDOM.findDOMNode(stub);
+    stub.setState({value: '3'});
+
+    expect(node.value).toEqual('3');
   });
 
   it('should display `defaultValue` of number 0', () => {
